@@ -1,16 +1,16 @@
 #!/bin/bash
-# Where the bot is hosted. notifier.diko.me if the domain for @simple_notifier_bot
-ADDRESS="notifier.diko.me"
-# Which message will be sent to you.
+# Token for chat send to. You can get this by /token command in the desirable chat.
+CHAT_TOKEN=""
+# Default message to send.
 MESSAGE="Done"
-# To which chat to send.
-USER_ID=""
+# Where the bot is hosted. notifier.diko.me is the domain for @simple_notifier_bot
+ADDRESS="notifier.diko.me"
 
 printUsage() {
     echo "Usage: notify [options...] [message]"
     echo " -h, --help               Show help"
-    echo " -a, --address <address>  Host address"
-    echo " -u, --userid <userid>    Chat ID"
+    echo " -a, --address <address>  Set the host address"
+    echo " -t, --token <token>      Set the chat token"
 }
 
 while [[ $# -ne 0 ]]; do
@@ -21,8 +21,8 @@ while [[ $# -ne 0 ]]; do
     -a | --address )
         shift; ADDRESS=$1
         ;;
-    -u | --userid )
-        shift; USER_ID=$1
+    -t | --token )
+        shift; CHAT_TOKEN=$1
         ;;
     -*)
         echo "Unexpected option '$1'"; printUsage; exit 1
@@ -34,8 +34,8 @@ while [[ $# -ne 0 ]]; do
     shift;
 done
 
-if [[ -z "$USER_ID" ]]; then
-    echo "User ID should be specified by -u <userid>, or be setting defaults."; exit 1;
+if [[ -z "$CHAT_TOKEN" ]]; then
+    echo "The chat token should be specified by -t <token>, or by setting the defaults."; exit 1;
 fi
 
-curl -H "UserID: $USER_ID" -d "$MESSAGE" "$ADDRESS" 
+curl -d "$MESSAGE" "$ADDRESS/?token=$CHAT_TOKEN" 

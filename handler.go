@@ -5,43 +5,72 @@ import (
     "log"
     "os"
     "net/http"
+    "strings"
+    "math/rand"
+    "sync"
+    "strconv"
+    "io/ioutil"
+    "time"
     "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
 var Bot *tgbotapi.BotAPI
 
-var IdTable map[string]int64
-
-func handler(w http.ResponseWriter, r *http.Request) {
-    _, ok := r.Header["UserID"]
-    if ok {
-        id, ok := IdTable[r.Header["UserID"][0]]
-        if ok {
-            msg := tgbotapi.NewMessage(id, "Done")
-            Bot.Send(msg)
-        }
-    } 
-    // fmt.Fprintf(w, "Hi there, I love %s!", r.URL.Path[1:])
+type KeysData struct {
+    sync.RWMutex
+    ChatKeys    map[int64]string
 }
 
-func httpHandler() {
-    log.Panic(http.ListenAndServe(":8080", nil))
-}
+var Keys KeysData
 
-func main() {
-    http.HandleFunc("/", handler)
-    go httpHandler()
-    var err error
-    Bot, err = tgbotapi.NewBotAPI(os.Getenv("TG_BOT_TOKEN"))
-	if err != nil {
-		log.Panic(err)
+func httpHandler(w http.ResponseWriter, r *http.Request) {
+    tokens := r.URL.Query()["token"]
+    if len(tokens) != 1 {
+        // error, should be exactly one token specified
+        http.Error(w, "Should be exactly one token specified", 500)
+        return
     }
-    
-    Bot.Debug = true
+    tokenParts := strings.Split(tokens[0], "-")
+    var chatIdStr, chatKey string
+    if len(tokenParts) == 2 {
+        chatIdStr = tokenParts[0]
+        chatKey = tokenParts[1]
+    }
+    chatId, err := strconv.ParseInt(chatIdStr, 36, 64)
+    Keys.RLock()
+    checkPassed := (len(tokenParts) == 2 && err == nil && Keys.ChatKeys[chatId] == chatKey)
+    Keys.RUnlock()
+    if !checkPassed {
+        http.Error(w, "Invalid token", 500)
+        return
+    }
+    text, err := ioutil.ReadAll(r.Body)
+    if err != nil {
+        // error reading body
+        http.Error(w, "Error reading body", 500)
+        return
+    }
+    _, err = Bot.Send(tgbotapi.NewMessage(chatId, string(text)))
+    if err != nil {
+        http.Error(w, "Error sending message", 500)
+    }
+}
 
-	log.Printf("Authorized on account %s", Bot.Self.UserName)
+func generateKey() string {
+    const letterBytes = "0123456789abcdefghijklmnopqrstuvwxyz"
+    res := make([]byte, 10)
+    for i := 0; i < 10; i++ {
+        res[i] = letterBytes[rand.Intn(len(letterBytes))]
+    }
+    return string(res)
+}
 
-	u := tgbotapi.NewUpdate(0)
+func formatToken(chatId int64, chatKey string) string {
+    return strconv.FormatInt(chatId, 36) + "-" + chatKey
+}
+
+func incommingMessagesHandler() {
+    u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
     updates, err := Bot.GetUpdatesChan(u)
@@ -54,27 +83,68 @@ func main() {
 			continue
         }
         if update.Message.IsCommand() {
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+		    log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
+            chatId := update.Message.Chat.ID
+            msg := tgbotapi.NewMessage(chatId, "")
 			switch update.Message.Command() {
 			case "help":
-				msg.Text = "Cant help you"
+                msg.Text =  "Usages:\n" +
+                            "/help - help\n" +
+                            "/start - start the bot\n" +
+                            "/token - get your chat token\n" +
+                            "/stop - stop the bot\n"
             case "start":
-                msg.Text = "OK"
-			case "stop":
-				msg.Text = "Hi :)"
+                chatKey := generateKey()
+                Keys.Lock()
+                _, exists := Keys.ChatKeys[chatId]
+                if exists {
+                    msg.Text = "The bot has beem already started!"
+                } else {
+                    Keys.ChatKeys[chatId] = chatKey
+                    msg.Text = "Welcome! Your chat token is " + formatToken(chatId, chatKey) + ". Use it for requests in our API."
+                }
+                Keys.Unlock()
+            case "token":
+                Keys.RLock()
+                chatKey, exists := Keys.ChatKeys[chatId]
+                Keys.RUnlock()
+                if exists {
+                    msg.Text = "Your chat token is " + formatToken(chatId, chatKey)
+                } else {
+                    msg.Text = "The bot hasn't been started! Use /start"
+                }
+            case "stop":
+                Keys.Lock()
+                _, exists := Keys.ChatKeys[chatId]
+                if exists {
+                    delete(Keys.ChatKeys, chatId)
+                    msg.Text = "Bot successfully stoped! Use /start to start it again."
+                } else {
+                    msg.Text = "Ooops, the bot hasn't been started! Use /start"
+                }
+                Keys.Unlock()
 			default:
-				msg.Text = "I don't know that command"
+				msg.Text = "Unexpected command, Use /help to see all commands."
 			}
 			Bot.Send(msg)
 		}
-
-		log.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
-
-        msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
-        log.Printf("%d", update.Message.Chat.ID)
-		msg.ReplyToMessageID = update.Message.MessageID
-
-		Bot.Send(msg)
 	}
+}
 
+func main() {
+    rand.Seed(time.Now().UnixNano())
+    http.HandleFunc("/", httpHandler)
+    Keys.ChatKeys = make(map[int64]string)
+    
+    var err error
+    Bot, err = tgbotapi.NewBotAPI(os.Getenv("TG_BOT_TOKEN"))
+	if err != nil {
+		log.Panic(err)
+    }
+    Bot.Debug = true
+    log.Printf("Authorized on account %s", Bot.Self.UserName)
+    
+    go incommingMessagesHandler()
+	
+    log.Panic(http.ListenAndServe(":8080", nil))
 }
