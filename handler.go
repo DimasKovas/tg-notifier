@@ -11,6 +11,7 @@ import (
     "strconv"
     "io/ioutil"
     "time"
+    "encoding/json"
     "github.com/go-telegram-bot-api/telegram-bot-api"
 )
 
@@ -20,6 +21,26 @@ type KeysData struct {
     sync.RWMutex
     ChatKeys    map[int64]string
 }
+
+func (data *KeysData) Save(path string) error {
+    encodedKeys, err := json.Marshal(data.ChatKeys)
+    if err != nil {
+        return err
+    }
+    err = ioutil.WriteFile(path, encodedKeys, 0644)
+    return err
+}
+
+func (data *KeysData) Load(path string) error {
+    encodedKeys, err := ioutil.ReadFile(path)
+    if err != nil {
+        return err
+    }
+    err = json.Unmarshal(encodedKeys, &data.ChatKeys)
+    return err
+}
+
+const DataPath = "chat_keys.txt"
 
 var Keys KeysData
 
@@ -98,9 +119,12 @@ func incommingMessagesHandler() {
                 Keys.Lock()
                 _, exists := Keys.ChatKeys[chatId]
                 if exists {
-                    msg.Text = "The bot has beem already started!"
+                    msg.Text = "The bot has been already started!"
                 } else {
                     Keys.ChatKeys[chatId] = chatKey
+                    if err := Keys.Save(DataPath); err != nil {
+                        log.Panic(err)
+                    }
                     msg.Text = "Welcome! Your chat token is " + formatToken(chatId, chatKey) + ". Use it for requests in our API."
                 }
                 Keys.Unlock()
@@ -118,6 +142,9 @@ func incommingMessagesHandler() {
                 _, exists := Keys.ChatKeys[chatId]
                 if exists {
                     delete(Keys.ChatKeys, chatId)
+                    if err := Keys.Save(DataPath); err != nil {
+                        log.Panic(err)
+                    }
                     msg.Text = "Bot successfully stoped! Use /start to start it again."
                 } else {
                     msg.Text = "Ooops, the bot hasn't been started! Use /start"
@@ -136,6 +163,15 @@ func main() {
     http.HandleFunc("/", httpHandler)
     Keys.ChatKeys = make(map[int64]string)
     
+    if _, err := os.Stat(DataPath); err == nil {
+        err = Keys.Load(DataPath)
+        if err != nil {
+            log.Panic(err)
+        }
+    } else if !os.IsNotExist(err) {
+        log.Panic(err)
+    }
+
     var err error
     Bot, err = tgbotapi.NewBotAPI(os.Getenv("TG_BOT_TOKEN"))
 	if err != nil {
