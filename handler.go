@@ -63,17 +63,20 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
     Keys.RUnlock()
     if !checkPassed {
         http.Error(w, "Invalid token", 500)
+        log.Printf("Recieved an invalid token '%s'", tokens[0])
         return
     }
     text, err := ioutil.ReadAll(r.Body)
     if err != nil {
         // error reading body
         http.Error(w, "Error reading body", 500)
+        log.Print(err)
         return
     }
     _, err = Bot.Send(tgbotapi.NewMessage(chatId, string(text)))
     if err != nil {
         http.Error(w, "Error sending message", 500)
+        log.Print(err)
     }
 }
 
@@ -125,6 +128,7 @@ func incommingMessagesHandler() {
                     if err := Keys.Save(DataPath); err != nil {
                         log.Panic(err)
                     }
+                    log.Printf("ChatKey [%s] for ChatId [%v] was successfully generated", chatKey, chatId)
                     msg.Text = "Welcome! Your chat token is " + formatToken(chatId, chatKey) + ". Use it for requests in our API."
                 }
                 Keys.Unlock()
@@ -145,6 +149,7 @@ func incommingMessagesHandler() {
                     if err := Keys.Save(DataPath); err != nil {
                         log.Panic(err)
                     }
+                    log.Printf("ChatKey [%s] for ChatId [%v] was successfully deleted")
                     msg.Text = "Bot successfully stoped! Use /start to start it again."
                 } else {
                     msg.Text = "Ooops, the bot hasn't been started! Use /start"
@@ -168,6 +173,7 @@ func main() {
         if err != nil {
             log.Panic(err)
         }
+        log.Printf("Chat keys were successfully loaded")
     } else if !os.IsNotExist(err) {
         log.Panic(err)
     }
