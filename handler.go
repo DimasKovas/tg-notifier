@@ -40,7 +40,7 @@ func (data *KeysData) Load(path string) error {
     return err
 }
 
-const DataPath = "chat_keys.txt"
+const DataPath = "/data/chat_keys.txt"
 
 var Keys KeysData
 
